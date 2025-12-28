@@ -151,7 +151,18 @@
                 reader.readAsText(file);
             };
 
-            // --- LOGIQUE METIER IA & PARSING (CORRIGÉE) ---
+            // --- NETTOYAGE JSON ROBUSTE ---
+            const extractJSON = (text) => {
+                // Cherche le premier { et le dernier } pour isoler le JSON du texte de l'IA
+                const firstBrace = text.indexOf('{');
+                const lastBrace = text.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                    return text.substring(firstBrace, lastBrace + 1);
+                }
+                return text;
+            };
+
+            // --- LOGIQUE METIER IA & PARSING ---
             const analyzeTarifPDF = async (blob) => {
                 try {
                     const arrayBuffer = await blob.arrayBuffer();
@@ -168,37 +179,34 @@
                         canvas.width = viewport.width;
                         await page.render({ canvasContext: ctx, viewport }).promise;
                         
-                        // Appel IA avec prompt strict
+                        // Prompt très strict pour l'IA
                         const result = await callIA({
-                            contents: [{ parts: [{ text: "Extrais la liste des produits sous forme d'un objet JSON strict. Structure: { \"products\": [ { \"name\": \"Nom complet\", \"price\": \"Prix numérique (ex: 120.50)\", \"packaging\": \"Unité (ex: 25 KG)\" } ] }. Ne mets RIEN d'autre que le JSON." }, { inlineData: { mimeType: "image/png", data: canvas.toDataURL('image/png').split(',')[1] } } ] }],
+                            contents: [{ parts: [{ text: "Extrais la liste des produits sous forme d'un objet JSON strict. Structure: { \"products\": [ { \"name\": \"Nom complet du produit\", \"price\": \"Prix numérique (ex: 120.50)\", \"packaging\": \"Unité (ex: 25 KG)\" } ] }. Ne mets RIEN d'autre que le JSON." }, { inlineData: { mimeType: "image/png", data: canvas.toDataURL('image/png').split(',')[1] } } ] }],
                             generationConfig: { responseMimeType: "application/json" }
                         });
                         
                         if (result.candidates && result.candidates[0].content) {
-                            let text = result.candidates[0].content.parts[0].text;
-                            const firstBrace = text.indexOf('{');
-                            const lastBrace = text.lastIndexOf('}');
+                            const rawText = result.candidates[0].content.parts[0].text;
+                            const cleanJson = extractJSON(rawText);
                             
-                            if (firstBrace !== -1 && lastBrace !== -1) {
-                                const jsonStr = text.substring(firstBrace, lastBrace + 1);
-                                try {
-                                    const data = JSON.parse(jsonStr);
-                                    if (data.products && Array.isArray(data.products)) {
-                                        const cleanProducts = data.products.map(p => ({
-                                            ...p,
-                                            price: typeof p.price === 'string' ? p.price.replace(',', '.') : p.price
-                                        }));
-                                        allProducts.push(...cleanProducts);
-                                    }
-                                } catch(jsonErr) {
-                                    console.warn("Erreur JSON après nettoyage:", jsonStr);
+                            try {
+                                const data = JSON.parse(cleanJson);
+                                if (data.products && Array.isArray(data.products)) {
+                                    // Normalisation des prix
+                                    const cleanProducts = data.products.map(p => ({
+                                        ...p,
+                                        price: p.price ? String(p.price).replace(',', '.').replace(/[^0-9.]/g, '') : '0'
+                                    }));
+                                    allProducts.push(...cleanProducts);
                                 }
+                            } catch(jsonErr) {
+                                console.warn("Erreur Parsing JSON IA:", jsonErr);
                             }
                         }
                     }
                     return allProducts;
                 } catch (e) {
-                    console.error("Erreur lecture PDF ou IA", e);
+                    console.error("Erreur lecture PDF", e);
                     return []; 
                 }
             };
@@ -208,13 +216,15 @@
             };
 
             // --- MOTEUR DE SYNC DROPBOX ---
-            const runSync = async () => {
+            const runSync = async (forceRescan = false) => {
                 if (!dbxConfig.token) return alert("Configurez le Token Dropbox d'abord.");
                 
                 setSyncStatus('loading');
-                setSyncLog('Démarrage synchronisation...');
-                const newRecentFiles = [];
+                setSyncLog(forceRescan ? 'Re-scan COMPLET forcé...' : 'Démarrage synchronisation...');
+                
+                let localTarifs = forceRescan ? [] : [...tarifs];
                 let updatesCount = 0;
+                const newRecentFiles = [];
 
                 try {
                     // 1. SYNC TARIFS
@@ -227,9 +237,10 @@
                             if (entry['.tag'] !== 'file' || !entry.name.toLowerCase().endsWith('.pdf')) continue;
                             
                             validEntryIds.push(entry.id);
-                            const existing = tarifs.find(t => t.id === entry.id);
+                            const existing = localTarifs.find(t => t.id === entry.id);
 
-                            const needsUpdate = !existing || existing.server_modified !== entry.server_modified || (!existing.products || existing.products.length === 0);
+                            // Force l'update si demandé ou si pas de produits
+                            const needsUpdate = forceRescan || !existing || existing.server_modified !== entry.server_modified || (!existing.products || existing.products.length === 0);
 
                             if (needsUpdate) {
                                 setSyncLog(`Traitement IA : ${entry.name}...`);
@@ -239,9 +250,9 @@
                                     const products = await analyzeTarifPDF(blob);
                                     
                                     if (products.length === 0) {
-                                        setSyncLog(`⚠️ 0 produits trouvés dans ${entry.name}.`);
+                                        setSyncLog(`⚠️ ${entry.name} : 0 produits. (Fichier ajouté pour recherche par nom)`);
                                     } else {
-                                        setSyncLog(`✅ SUCCÈS: ${products.length} produits extraits de ${entry.name}`);
+                                        setSyncLog(`✅ ${entry.name} : ${products.length} produits trouvés.`);
                                     }
 
                                     const newDoc = {
@@ -253,22 +264,30 @@
                                         type: 'tarif'
                                     };
                                     
+                                    // Mise à jour immédiate
                                     setTarifs(prev => {
                                         const filtered = prev.filter(p => p.id !== entry.id);
                                         return [...filtered, newDoc];
                                     });
+                                    // Mise à jour locale pour la suite de la boucle
+                                    localTarifs = [...localTarifs.filter(p => p.id !== entry.id), newDoc];
+
                                     newRecentFiles.push({ name: entry.name, type: 'tarif', date: new Date().toLocaleTimeString() });
                                     updatesCount++;
 
                                 } catch (fileError) {
-                                    setSyncLog(`❌ ÉCHEC fichier ${entry.name} : ${fileError.message}`);
+                                    setSyncLog(`❌ Erreur fichier ${entry.name} : ${fileError.message}`);
                                 }
                             }
                         }
-                        setTarifs(prev => prev.filter(t => validEntryIds.includes(t.id)));
+                        
+                        // Nettoyage orphelins (si non forcé, car forcé vide déjà tout)
+                        if(!forceRescan) {
+                             const cleaned = localTarifs.filter(t => validEntryIds.includes(t.id));
+                             setTarifs(cleaned);
+                        }
 
                     } catch (e) {
-                        console.error(e);
                         setSyncLog(`Erreur dossier Tarifs: ${e.message}`);
                     }
 
@@ -281,10 +300,9 @@
                         for (const entry of listFT.entries) {
                             if (entry['.tag'] !== 'file') continue;
                             validFTIds.push(entry.id);
+                            
                             const existing = fichesTechniques.find(f => f.id === entry.id);
-
-                            if (!existing || existing.server_modified !== entry.server_modified) {
-                                setSyncLog(`Indexation : ${entry.name}`);
+                            if (forceRescan || !existing || existing.server_modified !== entry.server_modified) {
                                 const productName = await analyzeFTName(null, entry.name);
                                 const newDoc = {
                                     id: entry.id,
@@ -295,11 +313,11 @@
                                     type: 'ft'
                                 };
                                 setFichesTechniques(prev => [...prev.filter(f => f.id !== entry.id), newDoc]);
-                                newRecentFiles.push({ name: entry.name, type: 'ft', date: new Date().toLocaleTimeString() });
                                 updatesCount++;
                             }
                         }
-                        setFichesTechniques(prev => prev.filter(f => validFTIds.includes(f.id)));
+                        if(!forceRescan) setFichesTechniques(prev => prev.filter(f => validFTIds.includes(f.id)));
+
                     } catch (e) {
                         setSyncLog(`Erreur dossier Fiches: ${e.message}`);
                     }
@@ -309,7 +327,7 @@
                         recentFiles: [...newRecentFiles, ...syncInfo.recentFiles].slice(0, 10)
                     });
                     setSyncStatus('success');
-                    setSyncLog(`Terminé ! ${updatesCount} mise(s) à jour.`);
+                    setSyncLog(`Terminé ! ${updatesCount} mises à jour.`);
 
                 } catch (globalError) {
                     setSyncStatus('error');
@@ -342,33 +360,33 @@
                 }
             };
 
-            // --- RECHERCHE (AMELIOREE) ---
+            // --- RECHERCHE (HYBRIDE) ---
             const searchResults = useMemo(() => {
                 if (queryStr.length < 2) return [];
                 const res = [];
+                const searchLower = queryStr.toLowerCase();
+
                 tarifs.forEach(t => {
-                    let addedAsFile = false;
+                    // 1. Recherche dans les produits extraits
+                    if (t.products && t.products.length > 0) {
+                        t.products.forEach(p => {
+                            const pName = p.name ? String(p.name).toLowerCase() : "";
+                            const pPack = p.packaging ? String(p.packaging).toLowerCase() : "";
+                            
+                            if (pName.includes(searchLower) || pPack.includes(searchLower)) {
+                                res.push({ ...p, source: t.name, path: t.path, sourceId: t.id, type: 'product' });
+                            }
+                        });
+                    }
 
-                    // 1. Recherche dans les produits (si existants)
-                    (t.products || []).forEach(p => {
-                        const pName = p.name ? String(p.name).toLowerCase() : "";
-                        const pPack = p.packaging ? String(p.packaging).toLowerCase() : "";
-                        
-                        if (pName.includes(queryStr.toLowerCase()) || pPack.includes(queryStr.toLowerCase())) {
-                            res.push({ ...p, source: t.name, path: t.path, sourceId: t.id, type: 'product' });
-                        }
-                    });
-
-                    // 2. Recherche de secours : Si le nom du fichier match, on l'ajoute comme "Catalogue Complet"
-                    // Cela garantit que même si l'extraction a échoué (0 produits), le fichier est trouvable par son nom
-                    if (t.name && t.name.toLowerCase().includes(queryStr.toLowerCase())) {
-                        // On vérifie si on n'a pas déjà ajouté ce fichier via ses produits pour éviter trop de bruit
-                        // Mais ici c'est utile d'avoir l'entrée "Fichier" distincte
+                    // 2. Recherche de secours sur le nom du fichier (Si extraction échouée ou produit non trouvé)
+                    if (t.name.toLowerCase().includes(searchLower)) {
+                        // On évite les doublons si possible, mais afficher le fichier est toujours utile
                         res.push({
-                            name: "📂 " + t.name, // Indicateur visuel
+                            name: "📂 " + t.name, 
                             price: "---",
-                            packaging: "Fichier PDF",
-                            source: "Catalogue complet",
+                            packaging: "Catalogue PDF",
+                            source: "Fichier Complet",
                             path: t.path,
                             sourceId: t.id,
                             type: 'file'
@@ -386,7 +404,7 @@
                 );
             }, [ftQueryStr, fichesTechniques]);
 
-            // Stats pour le debug
+            // Stats
             const totalProductsIndexed = useMemo(() => tarifs.reduce((acc, t) => acc + (t.products ? t.products.length : 0), 0), [tarifs]);
 
             if (view === 'login') return (
@@ -431,8 +449,8 @@
                                 {searchTab === 'tarifs' && (
                                     <div className="max-w-2xl mx-auto">
                                         <div className="text-center mb-6">
-                                            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold">
-                                                <Icon name="Database" size={12}/> {totalProductsIndexed} produits indexés depuis {tarifs.length} fichiers
+                                            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold shadow-sm border border-blue-100">
+                                                <Icon name="Database" size={12}/> {totalProductsIndexed} produits indexés ({tarifs.length} fichiers)
                                             </div>
                                         </div>
 
@@ -453,7 +471,7 @@
                                                         </div>
                                                     </div>
                                                     <div className="text-right">
-                                                        <div className="text-xl font-black text-slate-800">{p.price} <span className="text-xs font-bold text-slate-400">{p.type === 'file' ? '' : 'DH'}</span></div>
+                                                        <div className="text-xl font-black text-slate-800">{p.type === 'file' ? '' : p.price} <span className="text-xs font-bold text-slate-400">{p.type === 'file' ? '' : 'DH'}</span></div>
                                                         <button onClick={() => openDropboxFile(p.path)} className="text-[10px] font-bold text-blue-600 hover:underline mt-1 flex items-center justify-end gap-1">Voir Source <Icon name="ExternalLink" size={10}/></button>
                                                     </div>
                                                 </div>
@@ -495,7 +513,10 @@
                                         <div className="space-y-6">
                                             <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 flex flex-col md:flex-row items-center justify-between gap-6">
                                                 <div><div className="text-xs font-bold text-slate-400 uppercase mb-1">Dernière mise à jour</div><div className="text-lg font-bold text-slate-800 flex items-center gap-2"><Icon name="Clock" size={18} className="text-slate-400"/>{syncInfo.lastSync || "Jamais"}</div><div className="text-xs text-slate-500 mt-2">{tarifs.length} tarifs • {fichesTechniques.length} fiches indexées</div></div>
-                                                <button onClick={runSync} disabled={syncStatus === 'loading'} className={`px-6 py-3 rounded-xl font-bold text-white shadow-lg flex items-center gap-2 transition-all ${syncStatus === 'loading' ? 'bg-slate-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700 active:scale-95'}`}><Icon name={syncStatus === 'loading' ? 'Loader2' : 'RefreshCw'} className={syncStatus === 'loading' ? 'animate-spin' : ''}/>{syncStatus === 'loading' ? 'Scan en cours...' : 'Synchroniser Maintenant'}</button>
+                                                <div className="flex flex-col gap-2">
+                                                    <button onClick={() => runSync(false)} disabled={syncStatus === 'loading'} className={`px-6 py-3 rounded-xl font-bold text-white shadow-lg flex items-center gap-2 transition-all ${syncStatus === 'loading' ? 'bg-slate-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700 active:scale-95'}`}><Icon name={syncStatus === 'loading' ? 'Loader2' : 'RefreshCw'} className={syncStatus === 'loading' ? 'animate-spin' : ''}/>{syncStatus === 'loading' ? 'Scan en cours...' : 'Synchroniser Maintenant'}</button>
+                                                    <button onClick={() => { if(confirm('Voulez-vous vraiment effacer l\'index local et tout rescanner ?')) runSync(true); }} disabled={syncStatus === 'loading'} className="text-xs text-red-400 hover:text-red-600 underline text-center">Forcer Re-Scan Complet</button>
+                                                </div>
                                             </div>
                                             <div className="bg-slate-900 rounded-xl p-4 font-mono text-xs text-green-400 h-48 overflow-y-auto"><div className="opacity-50 mb-2"># Console de synchronisation Dropbox...</div>{syncLog && <div className="whitespace-pre-line">> {syncLog}</div>}</div>
                                         </div>
