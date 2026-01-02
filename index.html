@@ -389,10 +389,14 @@
                     setDbxConfig(newConfig);
                     localStorage.setItem('tdbx_config', JSON.stringify(newConfig));
                     
-                    setSyncLog("✅ Refresh Token configuré avec succès !");
+                    // SAUVEGARDE IMMEDIATE DE LA CONFIG SUR LE CLOUD
+                    // Pour que les autres utilisateurs la récupèrent
+                    await saveToCloud(null, null, null, null, newConfig);
+
+                    setSyncLog("✅ Refresh Token configuré et partagé avec succès !");
                     setSyncStatus('success');
                     setAuthCode('');
-                    alert("Succès ! Connexion permanente établie.");
+                    alert("Succès ! Connexion permanente établie et partagée avec l'équipe.");
                 } catch(e) {
                     setSyncLog("❌ Erreur OAuth : " + e.message);
                     setSyncStatus('error');
@@ -401,9 +405,18 @@
             };
 
             // --- CLOUD OPERATIONS ---
-            const saveToCloud = async (newTarifs, newFiches, newHistory, newUsers) => {
+            const saveToCloud = async (newTarifs, newFiches, newHistory, newUsers, specificConfig) => {
+                // On inclut la config (Refresh Token, App Key/Secret) dans la DB partagée
+                const configToSave = specificConfig || {
+                    refreshToken: dbxConfig.refreshToken,
+                    appKey: dbxConfig.appKey,
+                    appSecret: dbxConfig.appSecret,
+                    geminiKey: dbxConfig.geminiKey
+                };
+
                 const dataToSave = {
                     meta: { date: new Date().toLocaleString(), user: currentUser?.name || 'System' },
+                    config: configToSave, // SECTION CRITIQUE POUR LE PARTAGE D'ACCES
                     history: newHistory || dbHistory,
                     tarifs: newTarifs || tarifs,
                     fiches: newFiches || fiches,
@@ -432,6 +445,17 @@
                         setUsers(data.users);
                         // Sauvegarde locale immédiate pour que le login fonctionne
                         localStorage.setItem('tdbx_users', JSON.stringify(data.users));
+                    }
+
+                    // MISE A JOUR AUTOMATIQUE DE LA CONFIGURATION (OAUTH PARTAGÉ)
+                    if (data.config && data.config.refreshToken) {
+                        if (data.config.refreshToken !== dbxConfig.refreshToken) {
+                            const newSharedConfig = { ...dbxConfig, ...data.config };
+                            // On ne remplace pas le token d'accès courant s'il marche, mais on met à jour le refresh token
+                            setDbxConfig(newSharedConfig);
+                            localStorage.setItem('tdbx_config', JSON.stringify(newSharedConfig));
+                            if (!silent) console.log("Configuration OAuth mise à jour depuis le Cloud.");
+                        }
                     }
 
                     if (!silent) { setSyncLog("✅ Données à jour."); setSyncStatus('success'); }
