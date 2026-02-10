@@ -2141,6 +2141,187 @@
                                 </div>
                             )}
 
+                            {activeTab === 'quote' && (
+                                <div className="max-w-4xl mx-auto space-y-8">
+                                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                                        <div className="flex justify-between items-center mb-6">
+                                            <h3 className="font-bold text-lg flex items-center gap-2"><Icon name="FileEdit" /> Créer un Devis</h3>
+                                            <div className="flex gap-2">
+                                                {currentUser?.role === 'admin' && (
+                                                    <>
+                                                        <button onClick={() => setShowSavedQuotesModal(true)} className="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-100 transition-colors flex items-center gap-2 shadow-sm"><Icon name="Archive" size={16}/> Mes Devis</button>
+                                                        <button onClick={handleSaveQuote} className="bg-green-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-green-700 transition-colors flex items-center gap-2 shadow-lg"><Icon name="Save" size={16}/> Sauvegarder</button>
+                                                    </>
+                                                )}
+                                                <button onClick={generateQuotePDF} className="bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-slate-900 transition-colors flex items-center gap-2 shadow-lg"><Icon name="FileDown" size={16}/> Générer PDF</button>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="grid gap-4 mb-6">
+                                            <div className="grid gap-1">
+                                                <label className="text-xs font-bold uppercase text-slate-400">Nom du Client / Société</label>
+                                                <input className="w-full p-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none font-medium text-lg" placeholder="Ex: Ets Agricole du Sud..." value={quote.client} onChange={e => setQuote({...quote, client: e.target.value})} />
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
+                                            <div className="p-4 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
+                                                <h4 className="font-bold text-sm text-slate-600">Articles ({(quote?.items || []).length})</h4>
+                                                <button onClick={openQuoteProductModal} className="text-xs font-bold text-blue-600 bg-white border border-blue-100 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-1"><Icon name="Plus" size={14}/> Ajouter Produit</button>
+                                            </div>
+                                            
+                                            {(quote?.items || []).length === 0 ? (
+                                                <div className="p-8 text-center text-slate-400 text-sm">Aucun article ajouté. Commencez par ajouter des produits.</div>
+                                            ) : (
+                                                <div className="divide-y divide-slate-200">
+                                                    {(quote?.items || []).map((item, i) => (
+                                                        item && (
+                                                            <div key={item.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white">
+                                                                <div className="flex-1">
+                                                                    <div className="font-bold text-slate-800 flex items-center gap-2">
+                                                                        {item.name}
+                                                                        {!item.isTaxable ? (<span className="bg-green-100 text-green-700 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase">EXO</span>) : (<span className="bg-slate-100 text-slate-500 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase">TVA 20%</span>)}
+                                                                    </div>
+                                                                    <div className="text-xs text-slate-500">{item.packaging}</div>
+                                                                </div>
+                                                                <div className="flex items-center gap-6">
+                                                                    <div className="text-center"><div className="text-[10px] text-slate-400 uppercase font-bold">Qté</div><div className="font-bold text-slate-700">{item.qty}</div></div>
+                                                                    <div className="text-center"><div className="text-[10px] text-slate-400 uppercase font-bold">P.U.</div><div className="font-bold text-slate-700">{item.basePrice.toFixed(2)}</div></div>
+                                                                    <div className="text-right w-24"><div className="text-[10px] text-slate-400 uppercase font-bold">Total HT</div><div className="font-black text-blue-600">{calculateLineTotal(item).toFixed(2)}</div></div>
+                                                                    <button onClick={() => removeQuoteItem(item.id)} className="text-red-300 hover:text-red-600 transition-colors"><Icon name="Trash2" size={18}/></button>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    ))}
+                                                </div>
+                                            )}
+                                            
+                                            {(quote?.items || []).length > 0 && (
+                                                <div className="bg-slate-100 p-4 border-t border-slate-200">
+                                                    <div className="flex justify-end gap-8 text-sm">
+                                                        <div className="text-right">
+                                                            <div className="text-slate-500">Total HT</div>
+                                                            <div className="font-bold text-slate-800 text-lg">
+                                                                {(quote?.items || []).reduce((acc, item) => {
+                                                                    if (!item) return acc; // GUARD
+                                                                    return acc + calculateLineTotal(item);
+                                                                }, 0).toFixed(2)} DH
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <div className="text-slate-500">TTC</div>
+                                                            <div className="font-black text-blue-600 text-xl">
+                                                                {(() => {
+                                                                    let totalHT = 0;
+                                                                    let totalTVA = 0;
+                                                                    (quote?.items || []).forEach(item => {
+                                                                        if (!item) return; // GUARD
+                                                                        const line = calculateLineTotal(item);
+                                                                        totalHT += line;
+                                                                        if(item.isTaxable) totalTVA += line * 0.20;
+                                                                    });
+                                                                    return (totalHT + totalTVA).toFixed(2);
+                                                                })()} DH
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ONSSA TAB (NEW) */}
+                            {activeTab === 'onssa' && currentUser.role === 'admin' && (
+                                <div className="max-w-4xl mx-auto space-y-8">
+                                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
+                                        <div className="flex justify-between items-center mb-6">
+                                            <div>
+                                                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Icon name="ShieldCheck" className="text-green-600"/> Agréments ONSSA (Excel)</h2>
+                                                <p className="text-sm text-slate-500 mt-1">Comparateur de listes officielles pour la veille réglementaire.</p>
+                                                <p className="text-xs text-slate-400 mt-1 italic">Format attendu: Région (A), Province (B), Ville (C), Nom (D), Adresse (E)</p>
+                                            </div>
+                                            {onssaData.report && <button onClick={generateOnssaReportPDF} className="bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-lg flex items-center gap-2 hover:bg-slate-900"><Icon name="FileDown" size={16}/> Rapport PDF</button>}
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                                            {/* ZONE 1: BASE */}
+                                            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 flex flex-col items-center text-center">
+                                                <div className="bg-white p-3 rounded-full shadow-sm text-slate-400 mb-3"><Icon name="Database" size={24}/></div>
+                                                <h3 className="font-bold text-slate-700 mb-1">Liste de Base (Excel)</h3>
+                                                <p className="text-xs text-slate-400 mb-4">{onssaData.baseList.length > 0 ? `${onssaData.baseList.length} revendeurs (Date: ${onssaData.baseDate})` : "Aucune liste définie"}</p>
+                                                <button onClick={() => onssaBaseInputRef.current.click()} disabled={isOnssaAnalyzing} className="w-full bg-white border border-slate-300 text-slate-600 py-2 rounded-xl font-bold text-sm hover:bg-slate-100 flex items-center justify-center gap-2"><Icon name="Upload"/> Charger Base (XLSX)</button>
+                                                <input type="file" ref={onssaBaseInputRef} accept=".xlsx, .xls" className="hidden" onChange={(e) => handleOnssaExcel(e, 'base')}/>
+                                            </div>
+
+                                            {/* ZONE 2: NOUVELLE LISTE */}
+                                            <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 flex flex-col items-center text-center">
+                                                <div className="bg-white p-3 rounded-full shadow-sm text-blue-500 mb-3"><Icon name="RefreshCw" size={24} className={isOnssaAnalyzing ? "animate-spin" : ""}/></div>
+                                                <h3 className="font-bold text-blue-800 mb-1">Nouvelle Liste (Excel)</h3>
+                                                <p className="text-xs text-blue-400 mb-4">{onssaData.newList.length > 0 ? `${onssaData.newList.length} revendeurs (Date: ${onssaData.newDate})` : "En attente de fichier..."}</p>
+                                                <button onClick={() => onssaNewInputRef.current.click()} disabled={isOnssaAnalyzing || onssaData.baseList.length === 0} className="w-full bg-blue-600 text-white py-2 rounded-xl font-bold text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-blue-200"><Icon name="GitCompare"/> Comparer (XLSX)</button>
+                                                <input type="file" ref={onssaNewInputRef} accept=".xlsx, .xls" className="hidden" onChange={(e) => handleOnssaExcel(e, 'new')}/>
+                                            </div>
+                                        </div>
+
+                                        {isOnssaAnalyzing && (
+                                            <div className="bg-slate-900 text-white p-4 rounded-xl mb-6 animate-pulse flex items-center justify-center gap-3">
+                                                <Icon name="Loader2" className="animate-spin"/>
+                                                <span className="font-mono text-sm">{onssaProgress}</span>
+                                            </div>
+                                        )}
+
+                                        {/* RESULTATS COMPARAISON */}
+                                        {onssaData.report && !isOnssaAnalyzing && (
+                                            <div className="animate-fade">
+                                                <div className="flex gap-4 mb-6">
+                                                    <div className="flex-1 bg-green-50 p-4 rounded-xl border border-green-100 flex items-center gap-4">
+                                                        <div className="bg-white p-2 rounded-full text-green-600 shadow-sm"><Icon name="UserPlus" size={24}/></div>
+                                                        <div>
+                                                            <div className="text-2xl font-black text-green-700">{onssaData.report.countAdded}</div>
+                                                            <div className="text-xs font-bold text-green-800 uppercase">Ajoutés</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex-1 bg-red-50 p-4 rounded-xl border border-red-100 flex items-center gap-4">
+                                                        <div className="bg-white p-2 rounded-full text-red-500 shadow-sm"><Icon name="UserMinus" size={24}/></div>
+                                                        <div>
+                                                            <div className="text-2xl font-black text-red-600">{onssaData.report.countRemoved}</div>
+                                                            <div className="text-xs font-bold text-red-800 uppercase">Retirés</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* FILTRE RÉGIONS */}
+                                                <div className="bg-slate-100 p-4 rounded-2xl mb-6 border border-slate-200">
+                                                    <div className="flex justify-between items-center mb-3">
+                                                        <h4 className="font-bold text-slate-700 text-sm flex items-center gap-2"><Icon name="Filter" size={16}/> Filtrer Rapport par Région</h4>
+                                                        <button onClick={toggleAllRegions} className="text-xs text-blue-600 font-bold hover:underline">
+                                                            {selectedRegions.length === availableRegions.length ? "Tout décocher" : "Tout cocher"}
+                                                        </button>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
+                                                        {availableRegions.map(reg => (
+                                                            <label key={reg} className="flex items-center gap-2 text-xs bg-white p-2 rounded border border-slate-200 cursor-pointer hover:border-blue-300">
+                                                                <input type="checkbox" checked={selectedRegions.includes(reg)} onChange={() => toggleRegion(reg)} className="rounded text-blue-600 focus:ring-blue-500"/>
+                                                                <span className="truncate" title={reg}>{reg}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-6">
+                                                    {/* We show raw numbers here, PDF will be filtered */}
+                                                    <div className="text-center text-xs text-slate-400 italic mb-4">
+                                                        Les tableaux ci-dessous montrent un aperçu global. Utilisez le bouton "Rapport PDF" pour voir le détail filtré par région.
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* ADMIN TAB */}
                             {activeTab === 'admin' && currentUser.role === 'admin' && (
                                 <div className="animate-fade grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -2158,76 +2339,6 @@
                                     </div>
                                     {showAdminUploadModal && (<div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[60] p-4"><div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full animate-fade relative"><button onClick={() => setShowAdminUploadModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><Icon name="X"/></button><div className="mb-6"><div className="inline-flex bg-blue-100 p-3 rounded-full text-blue-600 mb-3"><Icon name="FilePlus" size={24}/></div><h2 className="text-xl font-bold">Gestion Tarifs</h2><p className="text-sm text-slate-500">Ajouter ou remplacer un catalogue</p></div><form onSubmit={handleManualTarifUpload} className="space-y-4"><div className="flex bg-slate-50 p-1 rounded-xl"><button type="button" onClick={() => setAdminUploadMode('new')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${adminUploadMode === 'new' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>Nouveau</button><button type="button" onClick={() => setAdminUploadMode('update')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${adminUploadMode === 'update' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>Mise à jour</button></div>{adminUploadMode === 'update' && (<div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Tarif à remplacer</label><select className="w-full p-3 border rounded-xl text-sm bg-white" required value={targetTarifId} onChange={e => setTargetTarifId(e.target.value)}><option value="">-- Choisir --</option>{(tarifs || []).map(t => t && <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>)}<div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Fichier PDF</label><input type="file" accept="application/pdf" required ref={adminFileInputRef} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/></div><div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Remise T4 (%)</label><input type="number" min="0" max="100" step="0.1" value={t4Value} onChange={e => setT4Value(e.target.value)} className="w-full p-3 border rounded-xl text-sm bg-slate-50 font-mono text-orange-600 font-bold" placeholder="0.0"/><p className="text-[10px] text-slate-400 mt-1">Sera déduit du prix TTC ou EXO pour l'affichage.</p></div><button disabled={syncStatus === 'working'} className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold mt-2 hover:bg-slate-900 disabled:opacity-50 flex items-center justify-center gap-2">{syncStatus === 'working' ? <Icon name="Loader2" className="animate-spin"/> : <Icon name="UploadCloud"/>} Valider</button></form></div></div>)}
                                     <div className="lg:col-span-2 bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[600px]"><div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="font-bold text-lg text-slate-800">Indexation</h3><div className="flex gap-2"><button onClick={handleDeleteAllTarifs} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1 transition-colors"><Icon name="Trash2" size={14}/> Tout Supprimer</button><button onClick={() => { setAdminUploadMode('new'); setShowAdminUploadModal(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-200 transition-all active:scale-95"><Icon name="Plus"/> Gestion Tarifs</button><button onClick={() => handleSyncFiches()} disabled={syncStatus === 'working'} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg shadow-blue-200 transition-all active:scale-95 disabled:opacity-50"><Icon name={syncStatus === 'working' ? "Loader2" : "RefreshCw"} className={syncStatus === 'working' ? "animate-spin" : ""}/> Scan/Sync Fiches</button></div></div><div className="flex-1 overflow-auto p-0"><table className="w-full text-sm text-left"><thead className="bg-white sticky top-0 shadow-sm text-slate-500 font-bold text-[10px] uppercase"><tr><th className="p-4">Fichier</th><th className="p-4">Type</th><th className="p-4 text-center">Info</th><th className="p-4 text-right">Actions</th></tr></thead><tbody className="divide-y divide-slate-50">{(tarifs || []).map(t => t && (<tr key={t.id} className="hover:bg-blue-50/30 group"><td className="p-4 font-bold text-slate-700">{t.name}</td><td className="p-4"><span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">TARIF</span></td><td className="p-4 text-center"><div className="text-blue-600 font-bold">{(t.products || []).length} produits</div>{t.t4_percentage > 0 && <div className="text-xs text-orange-500 font-bold">T4: -{t.t4_percentage}%</div>}</td><td className="p-4 text-right"><div className="flex justify-end gap-2">{t.report && <button onClick={() => setViewingReport(t.report)} className="p-2 text-orange-500 hover:text-orange-700 bg-orange-50 rounded-lg" title="Voir Rapport Fluctuation"><Icon name="TrendingUp" size={16}/></button>}<button onClick={() => handleDeleteEntry('tarif', t.id, t.name)} className="text-slate-300 hover:text-red-500 transition-colors p-2" title="Supprimer"><Icon name="Trash2" size={16}/></button></div></td></tr>))}{(fiches || []).map(f => f && (<tr key={f.id} className="hover:bg-indigo-50/30 group"><td className="p-4 font-bold text-slate-700">{f.name}</td><td className="p-4"><span className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded text-xs font-bold">FICHE</span></td><td className="p-4 text-center text-slate-400">PDF</td><td className="p-4 text-right"><button onClick={() => handleDeleteEntry('fiche', f.id, f.name)} className="text-slate-300 hover:text-red-500 transition-colors p-2" title="Supprimer"><Icon name="Trash2" size={16}/></button></td></tr>))}</tbody></table></div></div></div>
-                            )}
-
-                            {/* SECURITY TAB */}
-                            {activeTab === 'security' && currentUser.role === 'admin' && (
-                                <div className="max-w-4xl mx-auto space-y-8 animate-fade">
-                                    {/* ... Security Content ... */}
-                                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-                                        <h3 className="font-bold text-lg mb-6 flex items-center gap-2"><Icon name="Shield" /> Demandes d'autorisation ({(pendingRequests || []).length})</h3>
-                                        {(!pendingRequests || pendingRequests.length === 0) ? (
-                                            <div className="text-center py-8 text-slate-400 italic text-sm">Aucune demande en attente.</div>
-                                        ) : (
-                                            <div className="space-y-4">
-                                                {(pendingRequests || []).map((req, i) => (
-                                                    <div key={i} className="flex flex-col md:flex-row items-center justify-between bg-orange-50 p-4 rounded-2xl border border-orange-100 gap-4">
-                                                        <div className="flex items-center gap-4">
-                                                            <div className="w-10 h-10 bg-orange-200 text-orange-700 rounded-full flex items-center justify-center font-bold"><Icon name="User"/></div>
-                                                            <div>
-                                                                <div className="font-bold text-slate-800">{req.user} <span className="text-xs font-normal text-slate-500">({req.login})</span></div>
-                                                                <div className="text-xs font-mono text-slate-500 bg-white px-2 py-1 rounded border border-orange-200 mt-1 max-w-[250px] truncate" title={req.deviceId}>{req.deviceId}</div>
-                                                                <div className="text-[10px] text-slate-400 mt-1">{req.date}</div>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex gap-2 w-full md:w-auto">
-                                                            <button onClick={() => handleRejectDevice(req)} className="flex-1 md:flex-none px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-xl font-bold text-xs transition-colors">Rejeter</button>
-                                                            <button onClick={() => handleApproveDevice(req)} className="flex-1 md:flex-none px-4 py-2 bg-green-600 text-white hover:bg-green-700 rounded-xl font-bold text-xs shadow-lg shadow-green-200 transition-colors">Autoriser</button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* AJOUT MANUEL APPAREIL */}
-                                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-                                        <h3 className="font-bold text-lg mb-6 flex items-center gap-2"><Icon name="PlusCircle" /> Ajouter un appareil manuellement</h3>
-                                        <div className="flex flex-col md:flex-row gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                            <div className="flex-1">
-                                                <label className="text-xs font-bold uppercase text-slate-400 block mb-1">ID Appareil (Reçu du collaborateur)</label>
-                                                <input value={manualAddId} onChange={e => setManualAddId(e.target.value)} className="w-full p-3 border rounded-xl text-sm font-mono" placeholder="dev_..." />
-                                            </div>
-                                            <div className="flex-1">
-                                                <label className="text-xs font-bold uppercase text-slate-400 block mb-1">Nom Utilisateur</label>
-                                                <input value={manualAddName} onChange={e => setManualAddName(e.target.value)} className="w-full p-3 border rounded-xl text-sm" placeholder="Ex: Jean Dupont" />
-                                            </div>
-                                            <div className="flex items-end">
-                                                <button onClick={handleManualAddDevice} className="bg-green-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-green-700 w-full md:w-auto">Valider</button>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 opacity-80">
-                                        <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-500"><Icon name="Smartphone" /> Appareils Autorisés ({(authorizedDevices || []).length})</h3>
-                                        <div className="max-h-60 overflow-y-auto space-y-2">
-                                            {(authorizedDevices || []).map((dev, i) => {
-                                                const devId = typeof dev === 'string' ? dev : dev.id;
-                                                const devUser = typeof dev === 'object' ? dev.user : 'Ancien Appareil';
-                                                const devLogin = typeof dev === 'object' ? dev.login : '';
-                                                return (
-                                                    <div key={i} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                                        <div className="flex flex-col">
-                                                            {devUser !== 'Ancien Appareil' && <div className="font-bold text-slate-800 text-sm mb-1">{devUser} <span className="text-slate-400 font-normal text-xs">({devLogin})</span></div>}
-                                                            <div className="font-mono text-xs text-slate-600 truncate max-w-[200px] md:max-w-xs">{devId}</div>
-                                                        </div>
-                                                        <button onClick={() => handleRevokeDevice(dev)} className="text-xs font-bold text-red-400 hover:text-red-600 flex items-center gap-1"><Icon name="XCircle" size={14}/> Révoquer</button>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                </div>
                             )}
 
                             {/* USERS TAB */}
